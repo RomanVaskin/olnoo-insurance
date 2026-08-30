@@ -1,3 +1,5 @@
+'use client'
+
 import { LayoutDashboard, Trophy, Users, ShieldCheck, Settings } from 'lucide-react'
 import { AppShell, type NavSection } from '@/components/app-shell'
 
