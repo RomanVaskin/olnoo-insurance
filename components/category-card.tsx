@@ -19,13 +19,15 @@ export function CategoryCard({
       href={link}
       className={cn(
         'group relative overflow-hidden rounded-2xl border border-border bg-card transition-all hover:shadow-lg hover:shadow-foreground/5',
-        featured ? 'sm:col-span-2 lg:row-span-2' : '',
+        featured ? 'sm:col-span-2 lg:row-span-2 lg:flex lg:flex-col' : '',
       )}
     >
       <div
         className={cn(
           'relative w-full overflow-hidden',
-          featured ? 'aspect-[16/10] lg:aspect-auto lg:h-72' : 'aspect-[16/10]',
+          featured
+            ? 'aspect-[16/10] lg:aspect-auto lg:min-h-0 lg:flex-1'
+            : 'aspect-[16/10]',
         )}
       >
         <Image
