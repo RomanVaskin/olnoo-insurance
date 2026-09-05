@@ -1,0 +1,23 @@
+name: Deploy OLNOO Insurance
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to KZ
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.KZ_HOST }}
+          username: ${{ secrets.KZ_USER }}
+          key: ${{ secrets.KZ_SSH_KEY }}
+          script: |
+            cd /opt/olnoo/projects/olnoo-insurance
+            git pull
+            npm run build
+            systemctl restart olnoo-insurance
