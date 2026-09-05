@@ -41,9 +41,9 @@ export function SiteFooter() {
               <Image
                 src="/olnoo-insurance-horizontal-primary.png"
                 alt="OLNOO Insurance"
-                width={2508}
-                height={627}
-                className="h-9 w-auto"
+                width={2180}
+                height={721}
+                className="h-14 w-auto md:h-[88px]"
               />
             </Link>
             <p className="max-w-xs text-sm leading-relaxed text-muted-foreground text-pretty">
