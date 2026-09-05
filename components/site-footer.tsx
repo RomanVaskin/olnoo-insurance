@@ -39,11 +39,11 @@ export function SiteFooter() {
           <div className="space-y-4">
             <Link href="/" className="inline-flex items-center">
               <Image
-                src="/olnoo-insurance-horizontal-primary.png"
+                src="/olnoo-insurance-horizontal-primary-v2.png"
                 alt="OLNOO Insurance"
-                width={2180}
-                height={721}
-                className="h-14 w-auto md:h-[88px]"
+                width={2065}
+                height={534}
+                className="h-[48px] w-auto"
               />
             </Link>
             <p className="max-w-xs text-sm leading-relaxed text-muted-foreground text-pretty">

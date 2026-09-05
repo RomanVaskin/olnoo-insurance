@@ -24,15 +24,15 @@ export function SiteHeader() {
 
   return (
     <header className="sticky top-0 z-50 border-b border-border bg-background/80 backdrop-blur-md">
-      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 md:h-[104px] lg:px-8">
+      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
         <Link href="/" className="inline-flex items-center">
           <Image
-            src="/olnoo-insurance-horizontal-primary.png"
+            src="/olnoo-insurance-horizontal-primary-v2.png"
             alt="OLNOO Insurance"
-            width={2180}
-            height={721}
+            width={2065}
+            height={534}
             priority
-            className="h-14 w-auto md:h-[88px]"
+            className="h-[48px] w-auto"
           />
         </Link>
 
