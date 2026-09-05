@@ -1,5 +1,5 @@
+import Image from 'next/image'
 import Link from 'next/link'
-import { Logo } from '@/components/brand'
 
 const columns = [
   {
@@ -37,7 +37,15 @@ export function SiteFooter() {
       <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8">
         <div className="grid gap-10 md:grid-cols-[1.5fr_1fr_1fr_1fr]">
           <div className="space-y-4">
-            <Logo />
+            <Link href="/" className="inline-flex items-center">
+              <Image
+                src="/olnoo-insurance-horizontal-primary.png"
+                alt="OLNOO Insurance"
+                width={2508}
+                height={627}
+                className="h-9 w-auto"
+              />
+            </Link>
             <p className="max-w-xs text-sm leading-relaxed text-muted-foreground text-pretty">
               Универсальная страховая платформа. Страхование проще — выбирайте,
               сравнивайте и оформляйте полисы в одном месте.

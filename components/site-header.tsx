@@ -1,11 +1,11 @@
 'use client'
 
+import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useState } from 'react'
 import { Menu, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Logo } from '@/components/brand'
 import { cn } from '@/lib/utils'
 
 const nav = [
@@ -25,7 +25,16 @@ export function SiteHeader() {
   return (
     <header className="sticky top-0 z-50 border-b border-border bg-background/80 backdrop-blur-md">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
-        <Logo />
+        <Link href="/" className="inline-flex items-center">
+          <Image
+            src="/olnoo-insurance-horizontal-primary.png"
+            alt="OLNOO Insurance"
+            width={2508}
+            height={627}
+            priority
+            className="h-9 w-auto"
+          />
+        </Link>
 
         <nav className="hidden items-center gap-1 md:flex">
           {nav.map((item) => (
