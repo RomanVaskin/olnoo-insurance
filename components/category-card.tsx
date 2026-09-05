@@ -13,7 +13,11 @@ export function CategoryCard({
   href?: string
   featured?: boolean
 }) {
-  const link = href ?? (category.slug === 'sport' ? '/sport' : '/insurance')
+  const link =
+  href ??
+  (category.slug === 'sport'
+    ? 'https://sport.insurance.olnoo.com'
+    : '/insurance')
   return (
     <Link
       href={link}
