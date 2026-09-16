@@ -9,6 +9,7 @@ import {
   LifeBuoy,
 } from 'lucide-react'
 import { AppShell, type NavSection } from '@/components/app-shell'
+import { AuthGuard } from '@/components/auth-guard'
 
 const sections: NavSection[] = [
   {
@@ -34,15 +35,17 @@ export default function DashboardLayout({
   children: React.ReactNode
 }) {
   return (
-    <AppShell
-      sections={sections}
-      workspace={{
-        name: 'Алексей Иванов',
-        role: 'Спортсмен · Дзюдо',
-        initials: 'АИ',
-      }}
-    >
-      {children}
-    </AppShell>
+    <AuthGuard>
+      <AppShell
+        sections={sections}
+        workspace={{
+          name: 'Алексей Иванов',
+          role: 'Спортсмен · Дзюдо',
+          initials: 'АИ',
+        }}
+      >
+        {children}
+      </AppShell>
+    </AuthGuard>
   )
 }
