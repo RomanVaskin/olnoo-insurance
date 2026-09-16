@@ -1,3 +1,4 @@
+import { Suspense } from 'react'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { competitions, products } from '@/lib/data'
@@ -9,10 +10,13 @@ export function generateStaticParams() {
 
 export default async function DashboardCompetitionFlowPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>
+  searchParams: Promise<{ application_id?: string }>
 }) {
   const { slug } = await params
+  const { application_id: applicationId } = await searchParams
   const competition = competitions.find((c) => c.slug === slug)
   if (!competition) notFound()
 
@@ -26,10 +30,13 @@ export default async function DashboardCompetitionFlowPage({
       >
         ← К соревнованиям
       </Link>
-      <CompetitionInsuranceFlow
-        competition={competition}
-        products={sportProducts}
-      />
+      <Suspense>
+        <CompetitionInsuranceFlow
+          competition={competition}
+          products={sportProducts}
+          applicationId={applicationId}
+        />
+      </Suspense>
     </div>
   )
 }

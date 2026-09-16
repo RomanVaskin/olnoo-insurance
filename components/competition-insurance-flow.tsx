@@ -1,7 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import {
   Check,
   ShieldCheck,
@@ -17,6 +18,9 @@ import { Stepper } from '@/components/stepper'
 import { StatusBadge } from '@/components/status-badge'
 import { InsurerLogo } from '@/components/brand'
 import { Button } from '@/components/ui/button'
+import { PaymentResultPanel } from '@/components/payment-result'
+import { paymentsApi, type PaymentStatus } from '@/lib/payments-api'
+import { savePendingPayment, readPendingPaymentId, clearPendingPayment } from '@/lib/payment-storage'
 import { cn } from '@/lib/utils'
 
 const STEPS = ['Требования', 'Выбор страховки', 'Данные', 'Оплата']
@@ -30,12 +34,131 @@ function parseAmount(value: string) {
 export function CompetitionInsuranceFlow({
   competition,
   products,
+  applicationId,
 }: {
   competition: Competition
   products: Product[]
+  /** Real backend application to charge. Without it the payment step cannot be completed. */
+  applicationId?: string
 }) {
   const [step, setStep] = useState(0)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+
+  const searchParams = useSearchParams()
+  const isPaymentReturn = searchParams.get('payment') === 'return'
+
+  const [creatingPayment, setCreatingPayment] = useState(false)
+  const [paymentError, setPaymentError] = useState<string | null>(null)
+  const [paymentId, setPaymentId] = useState<string | null>(null)
+  const [paymentStatus, setPaymentStatus] = useState<PaymentStatus | null>(null)
+  const [applicationStatus, setApplicationStatus] = useState<string | null>(null)
+  const [policyUrl, setPolicyUrl] = useState<string | null>(null)
+  const [checkingStatus, setCheckingStatus] = useState(false)
+  const [contextLost, setContextLost] = useState(false)
+
+  async function checkPaymentStatus(id: string) {
+    setCheckingStatus(true)
+    setPaymentError(null)
+    const res = await paymentsApi.status(id)
+    if (!res.ok || !res.data) {
+      setPaymentError('Не удалось проверить статус платежа. Попробуйте ещё раз.')
+      setCheckingStatus(false)
+      return
+    }
+    setPaymentStatus(res.data.status)
+    if (res.data.status === 'paid') {
+      const full = await paymentsApi.get(id)
+      if (full.ok && full.data) {
+        setApplicationStatus(full.data.application?.status ?? null)
+        setPolicyUrl(full.data.policy?.policy_url ?? null)
+      }
+      clearPendingPayment()
+    }
+    setCheckingStatus(false)
+  }
+
+  async function startPayment() {
+    if (!applicationId) return
+    setPaymentError(null)
+    setCreatingPayment(true)
+
+    const returnUrl = `${window.location.origin}${window.location.pathname}?application_id=${applicationId}&payment=return`
+    const res = await paymentsApi.create(applicationId, returnUrl)
+
+    if (!res.ok || !res.data || !res.data.confirmation_url) {
+      setPaymentError(
+        res.errorCode === 'application_already_paid'
+          ? 'Заявка уже оплачена.'
+          : 'Не удалось создать платёж. Попробуйте ещё раз.',
+      )
+      setCreatingPayment(false)
+      return
+    }
+
+    savePendingPayment({ applicationId, paymentId: res.data.payment_id })
+    window.location.href = res.data.confirmation_url
+  }
+
+  // Return leg of the YooKassa redirect: recover payment_id for this application
+  // (saved right before the redirect, since the create response is the only
+  // place we ever learn it) and check the real status once.
+  useEffect(() => {
+    if (!isPaymentReturn || !applicationId) return
+    const restoredId = readPendingPaymentId(applicationId)
+    if (!restoredId) {
+      setContextLost(true)
+      return
+    }
+    setPaymentId(restoredId)
+    void checkPaymentStatus(restoredId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPaymentReturn, applicationId])
+
+  if (isPaymentReturn) {
+    return (
+      <div className="space-y-8">
+        <div className="overflow-hidden rounded-2xl border border-border bg-card p-5">
+          <h1 className="text-xl font-semibold tracking-tight text-foreground">
+            {competition.name}
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">Оплата полиса</p>
+        </div>
+
+        {contextLost ? (
+          <section className="mx-auto max-w-lg rounded-2xl border border-border bg-card p-8 text-center">
+            <AlertTriangle className="mx-auto size-8 text-muted-foreground" />
+            <h2 className="mt-4 text-lg font-semibold tracking-tight text-foreground">
+              Не удалось восстановить платёж
+            </h2>
+            <p className="mt-2 text-sm text-muted-foreground text-pretty">
+              Проверьте статус оплаты в разделе «Мои полисы» или попробуйте
+              оплатить заявку ещё раз.
+            </p>
+            <Button
+              className="mt-5 h-11 px-6"
+              render={<Link href="/dashboard/policies">Мои полисы</Link>}
+            />
+          </section>
+        ) : paymentStatus === null ? (
+          <section className="mx-auto max-w-lg rounded-2xl border border-border bg-card p-8 text-center">
+            <p className="text-sm text-muted-foreground">Проверяем статус оплаты…</p>
+          </section>
+        ) : (
+          <PaymentResultPanel
+            status={paymentStatus}
+            applicationStatus={applicationStatus}
+            policyUrl={policyUrl}
+            busy={checkingStatus || creatingPayment}
+            onRecheck={() => paymentId && checkPaymentStatus(paymentId)}
+            onRetry={() => void startPayment()}
+          />
+        )}
+        {paymentError ? (
+          <p className="text-center text-sm text-destructive">{paymentError}</p>
+        ) : null}
+      </div>
+    )
+  }
 
   const minCoverage = parseAmount(competition.requirements.minCoverage)
 
@@ -331,10 +454,21 @@ export function CompetitionInsuranceFlow({
               <Button
                 size="lg"
                 className="mt-5 h-11 w-full"
-                onClick={() => setStep(4)}
+                disabled={!applicationId || creatingPayment}
+                onClick={() => void startPayment()}
               >
-                Оплатить и оформить
+                {creatingPayment ? 'Создаём платёж…' : 'Оплатить и оформить'}
               </Button>
+              {!applicationId ? (
+                <p className="mt-3 text-xs text-muted-foreground text-pretty">
+                  Нет активной заявки для оплаты.
+                </p>
+              ) : null}
+              {paymentError ? (
+                <p className="mt-3 text-xs text-destructive text-pretty">
+                  {paymentError}
+                </p>
+              ) : null}
             </div>
           </div>
           <div className="flex justify-start">
@@ -346,34 +480,7 @@ export function CompetitionInsuranceFlow({
         </section>
       ) : null}
 
-      {step === 4 ? (
-        <section className="mx-auto max-w-lg rounded-2xl border border-border bg-card p-8 text-center">
-          <span className="mx-auto grid size-14 place-items-center rounded-full bg-success/10 text-success">
-            <Check className="size-7" />
-          </span>
-          <h2 className="mt-5 text-xl font-semibold tracking-tight text-foreground">
-            Полис оформлен
-          </h2>
-          <p className="mt-2 text-sm text-muted-foreground text-pretty">
-            Ваш полис «{selected?.product.name}» активен и соответствует
-            требованиям соревнования «{competition.name}». Копия отправлена на
-            email и доступна в разделе «Мои полисы».
-          </p>
-          <div className="mt-4 flex items-center justify-center gap-2 rounded-lg bg-success/10 px-3 py-2 text-sm text-success">
-            <ShieldCheck className="size-4" />
-            Требования соревнования выполнены
-          </div>
-          <div className="mt-6 flex flex-wrap justify-center gap-3">
-            <Button render={<Link href="/dashboard/policies">Мои полисы</Link>} />
-            <Button
-              variant="outline"
-              render={<Link href="/dashboard/competitions">К соревнованиям</Link>}
-            />
-          </div>
-        </section>
-      ) : null}
-
-      {step < 4 && !selected && step === 1 ? (
+      {!selected && step === 1 ? (
         <div className="flex items-start gap-3 rounded-xl border border-border bg-secondary/50 p-4">
           <AlertTriangle className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
           <p className="text-sm text-muted-foreground">
