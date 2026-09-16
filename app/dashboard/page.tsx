@@ -1,30 +1,95 @@
+'use client'
+
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import {
-  ShieldCheck,
-  Trophy,
-  Clock,
-  ArrowRight,
-  AlertTriangle,
-  CalendarDays,
-  MapPin,
-} from 'lucide-react'
-import { policies, competitions } from '@/lib/data'
+import { ShieldCheck, Clock, FileText, Wallet, ArrowRight, AlertTriangle } from 'lucide-react'
 import { PageHeader } from '@/components/page-header'
 import { StatCard } from '@/components/stat-card'
-import { PolicyCard } from '@/components/policy-card'
 import { StatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
+import {
+  athleteApi,
+  applicationsApi,
+  type AthleteProfile,
+  type AthleteApplication,
+} from '@/lib/athlete-api'
+
+const STATUS_LABELS: Record<AthleteApplication['status'], string> = {
+  draft: 'Черновик',
+  pending_payment: 'Ожидает оплаты',
+  paid: 'Оплачен',
+  policy_issued: 'Полис оформлен',
+  cancelled: 'Отменена',
+}
+
+function formatRub(kopecks: number) {
+  return new Intl.NumberFormat('ru-RU', {
+    style: 'currency',
+    currency: 'RUB',
+    maximumFractionDigits: 0,
+  }).format(kopecks / 100)
+}
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat('ru-RU').format(new Date(value))
+}
 
 export default function CustomerDashboardPage() {
-  const activePolicies = policies.filter((p) => p.status === 'Активна')
-  const expiring = policies.filter((p) => p.status === 'Истекает')
-  const upcoming = competitions.slice(0, 2)
+  const [profile, setProfile] = useState<AthleteProfile | null>(null)
+  const [profileError, setProfileError] = useState<string | null>(null)
+
+  const [applications, setApplications] = useState<AthleteApplication[] | null>(null)
+  const [applicationsError, setApplicationsError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let active = true
+    athleteApi.profile().then(({ ok, data }) => {
+      if (!active) return
+      if (ok && data) {
+        setProfile(data)
+      } else {
+        setProfileError('Не удалось загрузить данные спортсмена.')
+      }
+    })
+    return () => {
+      active = false
+    }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    applicationsApi.list().then(({ ok, data }) => {
+      if (!active) return
+      if (ok && data) {
+        setApplications(data)
+      } else {
+        setApplicationsError('Не удалось загрузить заявки.')
+      }
+    })
+    return () => {
+      active = false
+    }
+  }, [])
+
+  const fullName = profile
+    ? [profile.person.last_name, profile.person.first_name, profile.person.patronymic]
+        .filter(Boolean)
+        .join(' ')
+    : null
+
+  const activePolicies = (applications ?? []).filter(
+    (a) => a.status === 'paid' || a.status === 'policy_issued',
+  )
+  const pending = (applications ?? []).filter(
+    (a) => a.status === 'pending_payment' || a.status === 'draft',
+  )
+  const totalPaidKopecks = activePolicies.reduce((sum, a) => sum + a.amount_kopecks, 0)
 
   return (
     <div className="space-y-8">
       <PageHeader
         eyebrow="Личный кабинет"
-        title="Добро пожаловать, Алексей"
+        title={fullName ? `Добро пожаловать, ${fullName}` : 'Личный кабинет'}
         description="Управляйте своими полисами и проверяйте страховые требования соревнований."
         actions={
           <Button
@@ -38,127 +103,95 @@ export default function CustomerDashboardPage() {
         }
       />
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard
-          label="Активные полисы"
-          value={String(activePolicies.length)}
-          icon={ShieldCheck}
-          hint="Действуют сейчас"
-        />
-        <StatCard
-          label="Истекают скоро"
-          value={String(expiring.length)}
-          icon={Clock}
-          hint="Требуют продления"
-        />
-        <StatCard
-          label="Соревнования"
-          value="3"
-          icon={Trophy}
-          hint="Предстоящие с вашим участием"
-        />
-        <StatCard
-          label="Общее покрытие"
-          value="2.5 млн ₽"
-          icon={ShieldCheck}
-          hint="По всем полисам"
-        />
-      </div>
-
-      {expiring.length > 0 ? (
-        <div className="flex items-start gap-3 rounded-xl border border-warning/30 bg-warning/10 p-4">
-          <AlertTriangle className="mt-0.5 size-5 shrink-0 text-warning-foreground" />
-          <div className="flex-1">
-            <p className="text-sm font-medium text-foreground">
-              {expiring.length} полис скоро истекает
-            </p>
-            <p className="mt-0.5 text-sm text-muted-foreground">
-              «{expiring[0].type}» действует до{' '}
-              {expiring[0].dates.split('–')[1]?.trim()}. Продлите заранее, чтобы
-              сохранить покрытие.
-            </p>
-          </div>
-          <Button variant="outline" size="lg">
-            Продлить
-          </Button>
+      {profileError ? (
+        <div className="flex items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4">
+          <AlertTriangle className="mt-0.5 size-5 shrink-0 text-destructive" />
+          <p className="text-sm text-destructive">{profileError}</p>
         </div>
       ) : null}
 
-      <section>
-        <div className="flex items-end justify-between">
-          <h2 className="text-lg font-semibold tracking-tight text-foreground">
-            Мои полисы
-          </h2>
-          <Button
-            variant="ghost"
-            render={
-              <Link href="/dashboard/policies">
-                Все полисы
-                <ArrowRight className="size-4" />
-              </Link>
-            }
-          />
-        </div>
-        <div className="mt-4 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-          {policies.map((p) => (
-            <PolicyCard key={p.id} policy={p} />
-          ))}
-        </div>
-      </section>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard
+          label="Активные полисы"
+          value={applications ? String(activePolicies.length) : '—'}
+          icon={ShieldCheck}
+          hint="Оплаченные заявки"
+        />
+        <StatCard
+          label="Ожидают оплаты"
+          value={applications ? String(pending.length) : '—'}
+          icon={Clock}
+          hint="Требуют завершения"
+        />
+        <StatCard
+          label="Всего заявок"
+          value={applications ? String(applications.length) : '—'}
+          icon={FileText}
+          hint="За всё время"
+        />
+        <StatCard
+          label="Оплачено всего"
+          value={applications ? formatRub(totalPaidKopecks) : '—'}
+          icon={Wallet}
+          hint="По оплаченным заявкам"
+        />
+      </div>
 
       <section>
         <div className="flex items-end justify-between">
           <h2 className="text-lg font-semibold tracking-tight text-foreground">
-            Предстоящие соревнования
+            Мои заявки
           </h2>
-          <Button
-            variant="ghost"
-            render={
-              <Link href="/dashboard/competitions">
-                Все
-                <ArrowRight className="size-4" />
-              </Link>
-            }
-          />
         </div>
-        <div className="mt-4 space-y-3">
-          {upcoming.map((c) => {
-            const covered = c.insured >= c.participants * 0.9
-            return (
-              <Link
-                key={c.slug}
-                href={`/dashboard/competitions/${c.slug}`}
-                className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 transition-colors hover:border-brand/40 sm:flex-row sm:items-center sm:justify-between"
+
+        {applicationsError ? (
+          <div className="mt-4 flex items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4">
+            <AlertTriangle className="mt-0.5 size-5 shrink-0 text-destructive" />
+            <p className="text-sm text-destructive">{applicationsError}</p>
+          </div>
+        ) : applications === null ? (
+          <p className="mt-4 text-sm text-muted-foreground">Загружаем заявки…</p>
+        ) : applications.length === 0 ? (
+          <div className="mt-4 rounded-xl border border-border bg-secondary/50 p-6 text-center text-sm text-muted-foreground">
+            У вас пока нет заявок на страхование.
+          </div>
+        ) : (
+          <div className="mt-4 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+            {applications.map((a) => (
+              <div
+                key={a.id}
+                className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-5"
               >
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <h3 className="truncate font-medium text-foreground">
-                      {c.name}
-                    </h3>
-                    <StatusBadge status={c.sport} tone="neutral" />
-                  </div>
-                  <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
-                    <span className="flex items-center gap-1.5">
-                      <CalendarDays className="size-4" />
-                      {c.dateLabel}
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <MapPin className="size-4" />
-                      {c.location}
-                    </span>
-                  </div>
+                <div className="flex items-start justify-between gap-3">
+                  <h3 className="text-base font-semibold tracking-tight text-foreground">
+                    {a.product.name}
+                  </h3>
+                  <StatusBadge status={STATUS_LABELS[a.status]} />
                 </div>
-                <div className="flex shrink-0 items-center gap-3">
-                  <StatusBadge
-                    status={covered ? 'Требования выполнены' : 'Нужна страховка'}
-                    tone={covered ? 'success' : 'warning'}
-                  />
-                  <ArrowRight className="size-4 text-muted-foreground" />
-                </div>
-              </Link>
-            )
-          })}
-        </div>
+                <dl className="grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <dt className="text-xs text-muted-foreground">Федерация</dt>
+                    <dd className="font-medium text-foreground">
+                      {a.federation?.name ?? '—'}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-muted-foreground">Сумма</dt>
+                    <dd className="font-medium text-foreground">
+                      {formatRub(a.amount_kopecks)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-muted-foreground">Создана</dt>
+                    <dd className="font-medium text-foreground">
+                      {formatDate(a.created_at)}
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
     </div>
   )

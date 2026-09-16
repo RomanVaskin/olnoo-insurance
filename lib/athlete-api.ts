@@ -45,6 +45,15 @@ export interface CreateApplicationResponse {
   amount_kopecks: number
 }
 
+export interface AthleteApplication {
+  id: string
+  status: 'draft' | 'pending_payment' | 'paid' | 'policy_issued' | 'cancelled'
+  amount_kopecks: number
+  created_at: string
+  federation: { id: string; name: string } | null
+  product: { id: string; name: string }
+}
+
 interface ApiResult<T> {
   ok: boolean
   status: number
@@ -96,5 +105,9 @@ export const applicationsApi = {
       method: 'POST',
       body: JSON.stringify({ product_id: productId }),
     })
+  },
+  /** Returns only the authenticated athlete's own applications (backend scopes by person_id). */
+  list() {
+    return athleteRequest<AthleteApplication[]>('/applications', { method: 'GET' })
   },
 }
