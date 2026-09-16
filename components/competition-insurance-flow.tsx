@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import {
@@ -12,14 +12,18 @@ import {
   CalendarDays,
   MapPin,
 } from 'lucide-react'
-import type { Competition, Product } from '@/lib/data'
-import { insurerById } from '@/lib/data'
+import type { Competition } from '@/lib/data'
 import { Stepper } from '@/components/stepper'
 import { StatusBadge } from '@/components/status-badge'
-import { InsurerLogo } from '@/components/brand'
 import { Button } from '@/components/ui/button'
 import { PaymentResultPanel } from '@/components/payment-result'
 import { paymentsApi, type PaymentStatus } from '@/lib/payments-api'
+import {
+  athleteApi,
+  applicationsApi,
+  type AthleteProduct,
+  type AthleteProfile,
+} from '@/lib/athlete-api'
 import { savePendingPayment, readPendingPaymentId, clearPendingPayment } from '@/lib/payment-storage'
 import { cn } from '@/lib/utils'
 
@@ -31,14 +35,27 @@ function parseAmount(value: string) {
   return digits ? Number.parseInt(digits, 10) : 0
 }
 
+function formatRub(kopecks: number) {
+  return new Intl.NumberFormat('ru-RU', {
+    style: 'currency',
+    currency: 'RUB',
+    maximumFractionDigits: 0,
+  }).format(kopecks / 100)
+}
+
+function formatBirthdate(value: string | null) {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  return new Intl.DateTimeFormat('ru-RU').format(date)
+}
+
 export function CompetitionInsuranceFlow({
   competition,
-  products,
-  applicationId,
+  applicationId: initialApplicationId,
 }: {
   competition: Competition
-  products: Product[]
-  /** Real backend application to charge. Without it the payment step cannot be completed. */
+  /** Real backend application id, present only when returning from the YooKassa redirect. */
   applicationId?: string
 }) {
   const [step, setStep] = useState(0)
@@ -46,6 +63,22 @@ export function CompetitionInsuranceFlow({
 
   const searchParams = useSearchParams()
   const isPaymentReturn = searchParams.get('payment') === 'return'
+
+  const [profile, setProfile] = useState<AthleteProfile | null>(null)
+  const [profileLoading, setProfileLoading] = useState(true)
+  const [profileError, setProfileError] = useState<string | null>(null)
+
+  const [products, setProducts] = useState<AthleteProduct[] | null>(null)
+  const [productsLoading, setProductsLoading] = useState(true)
+  const [productsError, setProductsError] = useState<string | null>(null)
+
+  const [applicationId, setApplicationId] = useState<string | null>(initialApplicationId ?? null)
+  const [creatingApplication, setCreatingApplication] = useState(false)
+  const [applicationError, setApplicationError] = useState<string | null>(null)
+  // Refs (not state) so a double-click or a re-render before the create request
+  // resolves can never fire a second POST /api/applications for the same product.
+  const createdForProductId = useRef<string | null>(null)
+  const creationInFlight = useRef(false)
 
   const [creatingPayment, setCreatingPayment] = useState(false)
   const [paymentError, setPaymentError] = useState<string | null>(null)
@@ -55,6 +88,42 @@ export function CompetitionInsuranceFlow({
   const [policyUrl, setPolicyUrl] = useState<string | null>(null)
   const [checkingStatus, setCheckingStatus] = useState(false)
   const [contextLost, setContextLost] = useState(false)
+
+  // Return leg only needs the payment/application status check below, not the
+  // pre-payment profile/product data.
+  useEffect(() => {
+    if (isPaymentReturn) return
+    let active = true
+    athleteApi.profile().then((res) => {
+      if (!active) return
+      if (res.ok && res.data) {
+        setProfile(res.data)
+      } else {
+        setProfileError('Не удалось загрузить данные спортсмена.')
+      }
+      setProfileLoading(false)
+    })
+    return () => {
+      active = false
+    }
+  }, [isPaymentReturn])
+
+  useEffect(() => {
+    if (isPaymentReturn) return
+    let active = true
+    athleteApi.products().then((res) => {
+      if (!active) return
+      if (res.ok && res.data) {
+        setProducts(res.data)
+      } else {
+        setProductsError('Не удалось загрузить список страховых продуктов.')
+      }
+      setProductsLoading(false)
+    })
+    return () => {
+      active = false
+    }
+  }, [isPaymentReturn])
 
   async function checkPaymentStatus(id: string) {
     setCheckingStatus(true)
@@ -97,6 +166,36 @@ export function CompetitionInsuranceFlow({
 
     savePendingPayment({ applicationId, paymentId: res.data.payment_id })
     window.location.href = res.data.confirmation_url
+  }
+
+  // Creates the real backend application for the selected product, exactly once.
+  // Guarded by refs (synchronous, unlike state) so a double-click or a re-render
+  // firing before the first request resolves can never create a duplicate.
+  async function ensureApplication(productId: string): Promise<string | null> {
+    if (applicationId && createdForProductId.current === productId) {
+      return applicationId
+    }
+    if (creationInFlight.current) {
+      return null
+    }
+
+    creationInFlight.current = true
+    setCreatingApplication(true)
+    setApplicationError(null)
+
+    const res = await applicationsApi.create(productId)
+
+    creationInFlight.current = false
+    setCreatingApplication(false)
+
+    if (!res.ok || !res.data) {
+      setApplicationError('Не удалось создать заявку. Попробуйте ещё раз.')
+      return null
+    }
+
+    createdForProductId.current = productId
+    setApplicationId(res.data.application_id)
+    return res.data.application_id
   }
 
   // Return leg of the YooKassa redirect: recover payment_id for this application
@@ -162,15 +261,54 @@ export function CompetitionInsuranceFlow({
 
   const minCoverage = parseAmount(competition.requirements.minCoverage)
 
-  const enrichedProducts = products.map((p) => {
-    const meetsCoverage = parseAmount(p.coverage) >= minCoverage
-    const meetsRisk = p.benefits.some((b) =>
-      b.toLowerCase().includes('несчаст'),
-    )
-    return { product: p, compliant: meetsCoverage && meetsRisk, meetsCoverage }
+  const productItems = (products ?? []).map((product) => {
+    const coverageRub =
+      product.coverage_amount_kopecks !== null ? product.coverage_amount_kopecks / 100 : null
+    // null means the backend doesn't have a coverage figure for this product —
+    // we don't fabricate a pass/fail badge in that case.
+    const meetsCoverage = coverageRub === null ? null : coverageRub >= minCoverage
+    return { product, meetsCoverage }
   })
 
-  const selected = enrichedProducts.find((e) => e.product.id === selectedId)
+  const selected = productItems.find((item) => item.product.product_id === selectedId)
+
+  const membership =
+    profile?.federation_memberships.find(
+      (m) => m.federation?.id === selected?.product.federation.id,
+    ) ?? profile?.federation_memberships[0] ?? null
+
+  const profileFields = profile
+    ? [
+        {
+          l: 'Фамилия, имя и отчество',
+          v: [profile.person.last_name, profile.person.first_name, profile.person.patronymic]
+            .filter(Boolean)
+            .join(' '),
+        },
+        { l: 'Дата рождения', v: formatBirthdate(profile.person.birthdate) },
+        { l: 'Федерация', v: membership?.federation?.name ?? null },
+        { l: 'Спортивный клуб', v: membership?.club ?? null },
+        { l: 'Тренер', v: membership?.coach ?? null },
+        { l: 'Разряд', v: membership?.grade ?? null },
+        { l: 'Вид спорта', v: membership?.sport_name ?? null },
+        {
+          l: 'Вес',
+          v: membership?.weight !== null && membership?.weight !== undefined
+            ? `${membership.weight} кг`
+            : null,
+        },
+        { l: 'Телефон', v: profile.person.phone },
+        { l: 'Email', v: profile.person.email },
+      ]
+    : []
+
+  async function handleProceedToPayment() {
+    if (!selected) return
+    const id = await ensureApplication(selected.product.product_id)
+    if (id) {
+      setStep(3)
+    }
+  }
 
   return (
     <div className="space-y-8">
@@ -252,88 +390,97 @@ export function CompetitionInsuranceFlow({
             </p>
           </div>
 
-          <div className="grid gap-4">
-            {enrichedProducts.map(({ product, compliant, meetsCoverage }) => {
-              const insurer = insurerById(product.insurerId)
-              const isSelected = selectedId === product.id
-              return (
-                <button
-                  key={product.id}
-                  type="button"
-                  disabled={!compliant}
-                  onClick={() => setSelectedId(product.id)}
-                  className={cn(
-                    'flex flex-col gap-4 rounded-2xl border p-5 text-left transition-all sm:flex-row sm:items-center sm:justify-between',
-                    isSelected
-                      ? 'border-brand ring-2 ring-brand/30'
-                      : 'border-border hover:border-brand/40',
-                    !compliant && 'cursor-not-allowed opacity-60',
-                  )}
-                >
-                  <div className="flex items-start gap-4">
-                    <span
-                      className={cn(
-                        'mt-0.5 grid size-5 shrink-0 place-items-center rounded-full border',
-                        isSelected
-                          ? 'border-brand bg-brand text-brand-foreground'
-                          : 'border-border',
-                      )}
-                    >
-                      {isSelected ? <Check className="size-3.5" /> : null}
-                    </span>
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="font-semibold text-foreground">
-                          {product.name}
-                        </h3>
-                        {compliant ? (
-                          <StatusBadge
-                            status="Соответствует требованиям"
-                            tone="success"
-                          />
-                        ) : (
-                          <StatusBadge
-                            status={
-                              meetsCoverage
-                                ? 'Нет нужного риска'
-                                : 'Недостаточное покрытие'
-                            }
-                            tone="danger"
-                          />
+          {productsLoading ? (
+            <p className="text-sm text-muted-foreground">Загружаем доступные продукты…</p>
+          ) : productsError ? (
+            <div className="flex items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4">
+              <AlertTriangle className="mt-0.5 size-5 shrink-0 text-destructive" />
+              <p className="text-sm text-destructive">{productsError}</p>
+            </div>
+          ) : productItems.length === 0 ? (
+            <div className="rounded-xl border border-border bg-secondary/50 p-4 text-sm text-muted-foreground">
+              Для вашей федерации пока нет доступных страховых продуктов.
+            </div>
+          ) : (
+            <div className="grid gap-4">
+              {productItems.map(({ product, meetsCoverage }) => {
+                const isSelected = selectedId === product.product_id
+                const disabled = meetsCoverage === false
+                return (
+                  <button
+                    key={product.product_id}
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => setSelectedId(product.product_id)}
+                    className={cn(
+                      'flex flex-col gap-4 rounded-2xl border p-5 text-left transition-all sm:flex-row sm:items-center sm:justify-between',
+                      isSelected
+                        ? 'border-brand ring-2 ring-brand/30'
+                        : 'border-border hover:border-brand/40',
+                      disabled && 'cursor-not-allowed opacity-60',
+                    )}
+                  >
+                    <div className="flex items-start gap-4">
+                      <span
+                        className={cn(
+                          'mt-0.5 grid size-5 shrink-0 place-items-center rounded-full border',
+                          isSelected
+                            ? 'border-brand bg-brand text-brand-foreground'
+                            : 'border-border',
                         )}
-                      </div>
-                      <div className="mt-2 flex items-center gap-2">
-                        <InsurerLogo short={insurer?.short ?? '—'} />
-                        <span className="text-sm text-muted-foreground">
-                          {insurer?.name}
-                        </span>
-                      </div>
-                      <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-sm">
-                        <span className="text-muted-foreground">
-                          Покрытие:{' '}
-                          <span className="font-medium text-foreground">
-                            {product.coverage}
+                      >
+                        {isSelected ? <Check className="size-3.5" /> : null}
+                      </span>
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="font-semibold text-foreground">
+                            {product.name}
+                          </h3>
+                          {meetsCoverage === true ? (
+                            <StatusBadge
+                              status="Соответствует требованиям"
+                              tone="success"
+                            />
+                          ) : meetsCoverage === false ? (
+                            <StatusBadge
+                              status="Недостаточное покрытие"
+                              tone="danger"
+                            />
+                          ) : null}
+                        </div>
+                        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
+                          <span>{product.insurer_name ?? 'Страховщик не указан'}</span>
+                          <span>·</span>
+                          <span>{product.federation.name}</span>
+                        </div>
+                        <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-sm">
+                          <span className="text-muted-foreground">
+                            Покрытие:{' '}
+                            <span className="font-medium text-foreground">
+                              {product.coverage_amount_kopecks !== null
+                                ? formatRub(product.coverage_amount_kopecks)
+                                : '—'}
+                            </span>
                           </span>
-                        </span>
-                        <span className="text-muted-foreground">
-                          Риски:{' '}
-                          <span className="font-medium text-foreground">
-                            {product.benefits.join(', ')}
+                          <span className="text-muted-foreground">
+                            Срок действия:{' '}
+                            <span className="font-medium text-foreground">
+                              {product.validity_days} дн.
+                            </span>
                           </span>
-                        </span>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                  <div className="shrink-0 text-right">
-                    <p className="text-xs text-muted-foreground">{product.period}</p>
-                    <p className="text-xl font-semibold tracking-tight text-foreground">
-                      {product.price}
-                    </p>
-                  </div>
-                </button>
-              )
-            })}
-          </div>
+                    <div className="shrink-0 text-right">
+                      <p className="text-xl font-semibold tracking-tight text-foreground">
+                        {formatRub(product.amount_kopecks)}
+                      </p>
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+          )}
 
           <div className="flex items-center justify-between">
             <Button variant="ghost" onClick={() => setStep(0)}>
@@ -358,32 +505,44 @@ export function CompetitionInsuranceFlow({
           <h2 className="text-lg font-semibold tracking-tight text-foreground">
             Данные спортсмена
           </h2>
-          <div className="grid gap-5 rounded-2xl border border-border bg-card p-6 sm:grid-cols-2">
-            {[
-              { l: 'Фамилия и имя', v: 'Алексей Иванов' },
-              { l: 'Дата рождения', v: '12.04.2002' },
-              { l: 'Спортивный клуб', v: 'СК «Самбо-70»' },
-              { l: 'Разряд', v: 'КМС' },
-              { l: 'Телефон', v: '+7 900 000-00-00' },
-              { l: 'Email', v: 'a.ivanov@example.ru' },
-            ].map((f) => (
-              <label key={f.l} className="block">
-                <span className="text-sm text-muted-foreground">{f.l}</span>
-                <input
-                  defaultValue={f.v}
-                  className="mt-1.5 h-10 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground focus:border-brand focus:ring-2 focus:ring-brand/20 focus:outline-none"
-                />
-              </label>
-            ))}
-          </div>
+
+          {profileLoading ? (
+            <p className="text-sm text-muted-foreground">Загружаем данные спортсмена…</p>
+          ) : profileError ? (
+            <div className="flex items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4">
+              <AlertTriangle className="mt-0.5 size-5 shrink-0 text-destructive" />
+              <p className="text-sm text-destructive">{profileError}</p>
+            </div>
+          ) : profile ? (
+            <div className="grid gap-5 rounded-2xl border border-border bg-card p-6 sm:grid-cols-2">
+              {profileFields.map((f) => (
+                <div key={f.l} className="block">
+                  <span className="text-sm text-muted-foreground">{f.l}</span>
+                  <div className="mt-1.5 flex h-10 w-full items-center rounded-lg border border-border bg-background px-3 text-sm text-foreground">
+                    {f.v ?? '—'}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          {applicationError ? (
+            <p className="text-sm text-destructive">{applicationError}</p>
+          ) : null}
+
           <div className="flex items-center justify-between">
-            <Button variant="ghost" onClick={() => setStep(1)}>
+            <Button variant="ghost" onClick={() => setStep(1)} disabled={creatingApplication}>
               <ArrowLeft className="size-4" />
               Назад
             </Button>
-            <Button size="lg" className="h-11 px-6" onClick={() => setStep(3)}>
-              К оплате
-              <ArrowRight className="size-4" />
+            <Button
+              size="lg"
+              className="h-11 px-6"
+              disabled={!selected || !profile || creatingApplication}
+              onClick={() => void handleProceedToPayment()}
+            >
+              {creatingApplication ? 'Создаём заявку…' : 'К оплате'}
+              {!creatingApplication ? <ArrowRight className="size-4" /> : null}
             </Button>
           </div>
         </section>
@@ -434,7 +593,9 @@ export function CompetitionInsuranceFlow({
                   <div className="flex justify-between">
                     <dt className="text-muted-foreground">Покрытие</dt>
                     <dd className="font-medium text-foreground">
-                      {selected.product.coverage}
+                      {selected.product.coverage_amount_kopecks !== null
+                        ? formatRub(selected.product.coverage_amount_kopecks)
+                        : '—'}
                     </dd>
                   </div>
                   <div className="flex justify-between">
@@ -446,7 +607,7 @@ export function CompetitionInsuranceFlow({
                   <div className="mt-2 flex justify-between border-t border-border pt-3">
                     <dt className="text-muted-foreground">Итого</dt>
                     <dd className="text-lg font-semibold text-foreground">
-                      {selected.product.price}
+                      {formatRub(selected.product.amount_kopecks)}
                     </dd>
                   </div>
                 </dl>
@@ -480,7 +641,7 @@ export function CompetitionInsuranceFlow({
         </section>
       ) : null}
 
-      {!selected && step === 1 ? (
+      {!selected && step === 1 && !productsLoading && !productsError && productItems.length > 0 ? (
         <div className="flex items-start gap-3 rounded-xl border border-border bg-secondary/50 p-4">
           <AlertTriangle className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
           <p className="text-sm text-muted-foreground">

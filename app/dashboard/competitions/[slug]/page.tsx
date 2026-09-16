@@ -1,7 +1,7 @@
 import { Suspense } from 'react'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { competitions, products } from '@/lib/data'
+import { competitions } from '@/lib/data'
 import { CompetitionInsuranceFlow } from '@/components/competition-insurance-flow'
 
 export function generateStaticParams() {
@@ -20,8 +20,6 @@ export default async function DashboardCompetitionFlowPage({
   const competition = competitions.find((c) => c.slug === slug)
   if (!competition) notFound()
 
-  const sportProducts = products.filter((p) => p.category === 'sport')
-
   return (
     <div className="space-y-6">
       <Link
@@ -33,7 +31,6 @@ export default async function DashboardCompetitionFlowPage({
       <Suspense>
         <CompetitionInsuranceFlow
           competition={competition}
-          products={sportProducts}
           applicationId={applicationId}
         />
       </Suspense>
