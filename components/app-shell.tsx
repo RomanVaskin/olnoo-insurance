@@ -1,10 +1,10 @@
 'use client'
 
+import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useState } from 'react'
-import { Bell, Menu, Search, X, type LucideIcon } from 'lucide-react'
-import { Logo } from '@/components/brand'
+import { Bell, LogOut, Menu, Search, X, type LucideIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 export type NavItem = {
@@ -27,10 +27,12 @@ type Workspace = {
 export function AppShell({
   sections,
   workspace,
+  onLogout,
   children,
 }: {
   sections: NavSection[]
   workspace: Workspace
+  onLogout?: () => void
   children: React.ReactNode
 }) {
   const pathname = usePathname()
@@ -39,7 +41,15 @@ export function AppShell({
   const SidebarContent = (
     <div className="flex h-full flex-col">
       <div className="flex h-16 items-center border-b border-sidebar-border px-5">
-        <Logo />
+        <Link href="/" className="inline-flex items-center">
+          <Image
+            src="/olnoo-insurance-horizontal-primary-v2.png"
+            alt="OLNOO Insurance"
+            width={2065}
+            height={534}
+            className="h-9 w-auto"
+          />
+        </Link>
       </div>
 
       <div className="border-b border-sidebar-border p-3">
@@ -92,13 +102,23 @@ export function AppShell({
         ))}
       </nav>
 
-      <div className="border-t border-sidebar-border p-3">
+      <div className="border-t border-sidebar-border p-3 space-y-1">
         <Link
           href="/"
           className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
         >
           Вернуться на сайт
         </Link>
+        {onLogout ? (
+          <button
+            type="button"
+            onClick={onLogout}
+            className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
+          >
+            <LogOut className="size-4 shrink-0" />
+            Выйти
+          </button>
+        ) : null}
       </div>
     </div>
   )
